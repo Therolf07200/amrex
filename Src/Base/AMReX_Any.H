@@ -16,11 +16,7 @@ class Any
 {
 public:
 
-    //! Default constructor.  By default it stores an int.
-    Any ()
-        : m_ptr(std::make_unique<innards<int> >(0))
-        {}
-
+    Any () = default;
     ~Any () = default;
 
     Any (Any const& rhs) = delete;
@@ -37,25 +33,46 @@ public:
 
     //! Assigns by moving the given object.
     template <typename MF>
-    void operator= (MF && mf) {
+    Any& operator= (MF && mf) {
         m_ptr = std::make_unique<innards<MF> >(std::forward<MF>(mf));
+        return *this;
     }
 
     //! Returns the contained type.
     const std::type_info& Type () const {
-        return m_ptr->Type();
+        if (m_ptr) {
+            return m_ptr->Type();
+        } else {
+            return typeid(void);
+        }
     }
 
     //! Returns a reference to the contained object.
     template <typename MF>
-    MF& get () { return dynamic_cast<innards<MF>&>(*m_ptr).m_mf; }
+    MF& get () {
+        if (auto p0 = dynamic_cast<innards<MF>*>(m_ptr.get())) {
+            return p0->m_mf;
+        } else {
+            return dynamic_cast<innards<MF&>&>(*m_ptr).m_mf;
+        }
+    }
 
     //! Returns a const reference to the contained object.
     template <typename MF>
-    MF const& get () const { return dynamic_cast<innards<MF> const&>(*m_ptr).m_mf; }
+    MF const& get () const {
+        if (auto p0 = dynamic_cast<innards<MF>*>(m_ptr.get())) {
+            return p0->m_mf;
+        } else if (auto p1 = dynamic_cast<innards<MF&>*>(m_ptr.get())) {
+            return p1->m_mf;
+        } else {
+            return dynamic_cast<innards<MF const&> const&>(*m_ptr).m_mf;
+        }
+    }
 
     template <typename MF>
-    bool is () const { return m_ptr->Type() == typeid(MF); }
+    bool is () const { return Type() == typeid(MF); }
+
+    bool hasValue () const { return m_ptr != nullptr; }
 
 private:
     struct innards_base {

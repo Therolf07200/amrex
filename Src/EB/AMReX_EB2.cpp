@@ -11,11 +11,12 @@
 #include <AMReX_EB2_GeometryShop.H>
 #include <AMReX_EB2.H>
 #include <AMReX_EB2_IndexSpace_STL.H>
+#include <AMReX_EB2_IndexSpace_chkpt_file.H>
 #include <AMReX_ParmParse.H>
 #include <AMReX.H>
 #include <algorithm>
 
-namespace amrex { namespace EB2 {
+namespace amrex::EB2 {
 
 AMREX_EXPORT Vector<std::unique_ptr<IndexSpace> > IndexSpace::m_instance;
 
@@ -230,8 +231,31 @@ Build (const Geometry& geom, int required_coarsening_level,
     }
 }
 
+void addFineLevels (int num_new_fine_levels)
+{
+    BL_PROFILE("EB2::addFineLevels()");
+    auto *p = const_cast<IndexSpace*>(TopIndexSpace());
+    if (p) {
+        p->addFineLevels(num_new_fine_levels);
+    }
+}
+
+void
+BuildFromChkptFile (std::string const& fname,
+                    const Geometry& geom, int required_coarsening_level,
+                    int max_coarsening_level, int ngrow, bool build_coarse_level_by_coarsening,
+                    bool a_extend_domain_face)
+{
+    ChkptFile chkpt_file(fname);
+    IndexSpace::push(new IndexSpaceChkptFile(chkpt_file,
+                     geom, required_coarsening_level,
+                     max_coarsening_level, ngrow,
+                     build_coarse_level_by_coarsening,
+                     a_extend_domain_face));
+}
+
 namespace {
-static int comp_max_crse_level (Box cdomain, const Box& domain)
+int comp_max_crse_level (Box cdomain, const Box& domain)
 {
     int ilev;
     for (ilev = 0; ilev < 30; ++ilev) {
@@ -259,4 +283,4 @@ maxCoarseningLevel (IndexSpace const* ebis, const Geometry& geom)
     return comp_max_crse_level(cdomain,domain);
 }
 
-}}
+}

@@ -18,6 +18,8 @@ namespace amrex {
  *
  * CellQuadratic only works in 2D and 3D on cpu and gpu.
  *
+ * CellQuartic works in 1D, 2D and 3D on cpu and gpu with ref ratio of 2
+ *
  * CellConservativeQuartic only works with ref ratio of 2 on cpu and gpu.
  *
  * FaceDivFree works in 2D and 3D on cpu and gpu.
@@ -32,13 +34,12 @@ NodeBilinear              node_bilinear_interp;
 FaceLinear                face_linear_interp;
 FaceDivFree               face_divfree_interp;
 CellConservativeLinear    lincc_interp;
-CellConservativeLinear    cell_cons_interp(0);
+CellConservativeLinear    cell_cons_interp(false);
 CellConservativeProtected protected_interp;
 CellConservativeQuartic   quartic_interp;
 CellBilinear              cell_bilinear_interp;
 CellQuadratic             quadratic_interp;
-
-NodeBilinear::~NodeBilinear () {}
+CellQuartic               cell_quartic_interp;
 
 Box
 NodeBilinear::CoarseBox (const Box& fine,
@@ -348,10 +349,6 @@ void FaceLinear::interp_arr (Array<FArrayBox*, AMREX_SPACEDIM> const& crse,
               });
 }
 
-FaceLinear::~FaceLinear () {}
-
-CellBilinear::~CellBilinear () {}
-
 Box
 CellBilinear::CoarseBox (const Box& fine, int ratio)
 {
@@ -406,11 +403,7 @@ CellBilinear::interp (const FArrayBox&  crsefab,
 
 
 CellConservativeLinear::CellConservativeLinear (bool do_linear_limiting_)
-{
-    do_linear_limiting = do_linear_limiting_;
-}
-
-CellConservativeLinear::~CellConservativeLinear ()
+    : do_linear_limiting(do_linear_limiting_)
 {}
 
 Box
@@ -547,13 +540,6 @@ CellConservativeLinear::interp (const FArrayBox& crse,
     }
 }
 
-CellQuadratic::CellQuadratic (bool limit)
-{
-    do_limited_slope = limit;
-}
-
-CellQuadratic::~CellQuadratic () {}
-
 Box
 CellQuadratic::CoarseBox (const Box&     fine,
                           const IntVect& ratio)
@@ -683,8 +669,6 @@ CellQuadratic::interp (const FArrayBox& crse,
 #endif /*(AMREX_SPACEDIM == 1)*/
 }
 
-PCInterp::~PCInterp () {}
-
 Box
 PCInterp::CoarseBox (const Box& fine,
                      int        ratio)
@@ -727,8 +711,6 @@ PCInterp::interp (const FArrayBox& crse,
 
 CellConservativeProtected::CellConservativeProtected ()
     : CellConservativeLinear(true) {}
-
-CellConservativeProtected::~CellConservativeProtected () {}
 
 void
 CellConservativeProtected::protect (const FArrayBox& /*crse*/,
@@ -810,8 +792,6 @@ CellConservativeProtected::protect (const FArrayBox& /*crse*/,
 
 }
 
-CellConservativeQuartic::~CellConservativeQuartic () {}
-
 Box
 CellConservativeQuartic::CoarseBox (const Box& fine,
                                     int        ratio)
@@ -870,8 +850,6 @@ CellConservativeQuartic::interp (const FArrayBox&  crse,
                          crsearr, finearr);
     });
 }
-
-FaceDivFree::~FaceDivFree () {}
 
 Box
 FaceDivFree::CoarseBox (const Box& fine,
@@ -985,6 +963,92 @@ FaceDivFree::interp_arr (Array<FArrayBox*, AMREX_SPACEDIM> const& crse,
     AMREX_HOST_DEVICE_PARALLEL_FOR_4D_FLAG(runon,c_fine_region,ncomp,i,j,k,n,
     {
         amrex::facediv_int<Real>(i, j, k, fine_comp+n, finearr, ratio, cell_size);
+    });
+}
+
+Box
+CellQuartic::CoarseBox (const Box& fine, const IntVect& ratio)
+{
+    Box crse = amrex::coarsen(fine,ratio);
+    crse.grow(2);
+    return crse;
+}
+
+Box
+CellQuartic::CoarseBox (const Box& fine, int ratio)
+{
+    Box crse = amrex::coarsen(fine,ratio);
+    crse.grow(2);
+    return crse;
+}
+
+void
+CellQuartic::interp (const FArrayBox& crse,
+                     int              crse_comp,
+                     FArrayBox&       fine,
+                     int              fine_comp,
+                     int              ncomp,
+                     const Box&       fine_region,
+                     const IntVect&   ratio,
+                     const Geometry&  /*crse_geom*/,
+                     const Geometry&  /*fine_geom*/,
+                     Vector<BCRec> const&  /*bcr*/,
+                     int              /* actual_comp */,
+                     int              /* actual_state */,
+                     RunOn            runon)
+{
+    BL_PROFILE("CellQuartic::interp()");
+    amrex::ignore_unused(ratio);
+    AMREX_ASSERT(ratio == 2);
+
+    Box target_fine_region = fine_region & fine.box();
+
+    bool run_on_gpu = (runon == RunOn::Gpu && Gpu::inLaunchRegion());
+    amrex::ignore_unused(run_on_gpu);
+
+    Array4<Real const> const& crsearr = crse.const_array(crse_comp);
+    Array4<Real>       const& finearr = fine.array(fine_comp);
+
+#if (AMREX_SPACEDIM == 3)
+    Box bz = amrex::coarsen(target_fine_region, IntVect(2,2,1));
+    bz.grow(IntVect(2,2,0));
+    FArrayBox tmpz(bz, ncomp);
+    Elixir tmpz_eli;
+    if (run_on_gpu) tmpz_eli = tmpz.elixir();
+    Array4<Real> const& tmpzarr = tmpz.array();
+    AMREX_HOST_DEVICE_PARALLEL_FOR_4D_FLAG(runon, bz, ncomp, i, j, k, n,
+    {
+        cell_quartic_interp_z(i,j,k,n,tmpzarr,crsearr);
+    });
+#endif
+
+#if (AMREX_SPACEDIM >= 2)
+    Box by = amrex::coarsen(target_fine_region, IntVect(AMREX_D_DECL(2,1,1)));
+    by.grow(IntVect(AMREX_D_DECL(2,0,0)));
+    FArrayBox tmpy(by, ncomp);
+    Elixir tmpy_eli;
+    if (run_on_gpu) tmpy_eli = tmpy.elixir();
+    Array4<Real> const& tmpyarr = tmpy.array();
+#if (AMREX_SPACEDIM == 2)
+    Array4<Real const> srcarr = crsearr;
+#else
+    Array4<Real const> srcarr = tmpz.const_array();
+#endif
+    AMREX_HOST_DEVICE_PARALLEL_FOR_4D_FLAG(runon, by, ncomp, i, j, k, n,
+    {
+        cell_quartic_interp_y(i,j,k,n,tmpyarr,srcarr);
+    });
+#endif
+
+#if (AMREX_SPACEDIM == 1)
+    Array4<Real const> srcarr = crsearr;
+#else
+    srcarr = tmpy.const_array();
+#endif
+    AMREX_HOST_DEVICE_PARALLEL_FOR_4D_FLAG(runon, target_fine_region, ncomp,
+                                           i, j, k, n,
+    {
+        cell_quartic_interp_x(i,j,k,n,finearr,srcarr);
     });
 }
 

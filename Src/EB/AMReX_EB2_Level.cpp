@@ -1,9 +1,10 @@
 
 #include <AMReX_EB2_Level.H>
 #include <AMReX_IArrayBox.H>
+#include <AMReX_EB_chkpt_file.H>
 #include <algorithm>
 
-namespace amrex { namespace EB2 {
+namespace amrex::EB2 {
 
 void
 Level::prepareForCoarsening (const Level& rhs, int max_grid_size, IntVect ngrow)
@@ -916,4 +917,14 @@ Level::fillLevelSet (MultiFab& levelset, const Geometry& geom) const
     }
 }
 
-}}
+void
+Level::write_to_chkpt_file (const std::string& fname, bool extend_domain_face, int max_grid_size) const
+{
+    ChkptFile chkptFile(fname);
+    chkptFile.write_to_chkpt_file(m_grids, m_covered_grids,
+                                  m_volfrac, m_centroid, m_bndryarea, m_bndrycent,
+                                  m_bndrynorm, m_areafrac, m_facecent, m_edgecent, m_levelset,
+                                  m_geom, m_ngrow, extend_domain_face, max_grid_size);
+}
+
+}

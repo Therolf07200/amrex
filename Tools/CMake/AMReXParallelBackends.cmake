@@ -164,14 +164,16 @@ if (  AMReX_GPU_BACKEND STREQUAL "CUDA"
 
    target_compile_options( amrex PUBLIC $<${_genex}:${_cuda_flags}> )
 
+   unset(_genex)
+   # _cuda_flags will be used later in AMReX_Config.cmake
 endif ()
 
 #
 #
-#  SYCL/DPCPP
+#  SYCL
 #
 #
-if (AMReX_DPCPP)
+if (AMReX_SYCL)
    include(AMReXSYCL)
    target_link_libraries(amrex PUBLIC SYCL)
 endif ()
@@ -198,10 +200,12 @@ if (AMReX_HIP)
    unset(_valid_hip_compilers)
 
    if(NOT DEFINED HIP_PATH)
-      if(NOT DEFINED ENV{HIP_PATH})
-         set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to which HIP has been installed")
-      else()
+      if(DEFINED ENV{HIP_PATH})
          set(HIP_PATH $ENV{HIP_PATH} CACHE PATH "Path to which HIP has been installed")
+      elseif(DEFINED ENV{ROCM_PATH})
+         set(HIP_PATH "$ENV{ROCM_PATH}/hip" CACHE PATH "Path to which HIP has been installed")
+      else()
+         set(HIP_PATH "/opt/rocm/hip" CACHE PATH "Path to which HIP has been installed")
       endif()
    endif()
 
@@ -255,9 +259,15 @@ if (AMReX_HIP)
    if(AMReX_ROCTX)
        # To be modernized in the future, please see:
        # https://github.com/ROCm-Developer-Tools/roctracer/issues/56
-       target_include_directories(amrex PUBLIC ${HIP_PATH}/../roctracer/include ${HIP_PATH}/../rocprofiler/include)
-       target_link_libraries(amrex PUBLIC "-L${HIP_PATH}/../roctracer/lib/ -lroctracer64" "-L${HIP_PATH}/../roctracer/lib -lroctx64")
-   endif ()
+       target_include_directories(amrex SYSTEM PUBLIC
+           ${HIP_PATH}/../roctracer/include
+           ${HIP_PATH}/../rocprofiler/include
+       )
+       target_link_libraries(amrex PUBLIC
+           "-L${HIP_PATH}/../roctracer/lib -lroctracer64"
+           "-L${HIP_PATH}/../roctracer/lib -lroctx64"
+       )
+   endif()
    target_link_libraries(amrex PUBLIC hip::hiprand roc::rocrand roc::rocprim)
 
    # avoid forcing the rocm LLVM flags on a gfortran
@@ -271,7 +281,19 @@ if (AMReX_HIP)
        # else there will be a runtime issue (cannot find
        # missing gpu devices)
        target_compile_options(amrex PUBLIC
-          $<$<COMPILE_LANGUAGE:CXX>:--amdgpu-target=${AMReX_AMD_ARCH_HIPCC} -Wno-pass-failed>)
+          $<$<COMPILE_LANGUAGE:CXX>:--offload-arch=${AMReX_AMD_ARCH_HIPCC}>)
+   endif()
+
+   # ROCm 5.5: hipcc now relies on clang to offload code objects from (.a) archive files,
+   # so we need to tell the offload-linker to include all code objects in archives.
+   include(CheckLinkerFlag)
+   check_linker_flag(
+       CXX
+       "SHELL:-Xoffload-linker --whole-archive"
+       LINKER_HAS_WHOLE_ARCHIVE_OFFLOAD)
+   if(LINKER_HAS_WHOLE_ARCHIVE_OFFLOAD)
+       target_link_options(amrex PUBLIC
+           "$<$<LINK_LANGUAGE:CXX>:SHELL:-Xoffload-linker --whole-archive>")
    endif()
 
    target_compile_options(amrex PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-m64>)
