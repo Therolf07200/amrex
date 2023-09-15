@@ -372,6 +372,38 @@ Available choices are
   :cpp:`LPInfo::setConsolidationStrategy(int)`, to give control over how this
   process works.
 
+
+:cpp:`MLMG::setThrowException(bool)` controls whether multigrid failure results
+in aborting (default) or throwing an exception, whereby control will return to the calling
+application. The application code must catch the exception:
+
+.. highlight:: c++
+
+::
+
+    try {
+        mlmg.solve(...);
+    } catch (const MLMG::error& e) {
+        Print()<<e.what()<<std::endl; //Prints description of error
+
+        // Do something else...
+    }
+
+Note that exceptions that are not caught are passed up the calling chain so that
+application codes using specialized solvers relying on MLMG can still catch the exception.
+For example, using AMReX-Hydro's :cpp:`NodalProjector`
+
+.. highlight:: c++
+
+::
+
+    try {
+        nodal_projector.project(...);
+    } catch (const MLMG::error& e) {
+        // Do something else...
+    }
+
+
 Boundary Stencils for Cell-Centered Solvers
 ===========================================
 
@@ -509,7 +541,7 @@ passed to the constructor of a linear operator to disable the
 coarsening completely.  In that case the bottom solver is solving the
 residual correction form of the original problem. To build Hypre, follow the next steps:
 
-.. highlight:: c++
+.. highlight:: console
 
 ::
 
@@ -577,15 +609,16 @@ The user is referred to the
 AMReX can also use `PETSc <https://www.mcs.anl.gov/petsc/>`_ as a bottom solver for cell-centered
 problems. To build PETSc, follow the next steps:
 
-.. highlight:: c++
+.. highlight:: console
 
 ::
 
     1.- git clone https://github.com/petsc/petsc.git
     2.- cd petsc
-    3.- ./configure --download-hypre=yes --prefix=build_dir
-    4.- Follow the steps given by petsc
-    5.- Create an environment variable with the PETSC directory --
+    3.- ./configure --prefix=build_dir
+    4.- Invoke the ``make all'' command given at the end of the previous command output
+    5.- Invoke the ``make install'' command given at the end of the previous command output
+    6.- Create an environment variable with the PETSC directory --
         PETSC_DIR=/petsc_path/petsc/build_dir
 
 To use PETSc, one must include ``amrex/Src/Extern/PETSc``
