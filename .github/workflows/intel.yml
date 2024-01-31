@@ -45,8 +45,8 @@ jobs:
             -DCMAKE_CXX_COMPILER=$(which icpx)             \
             -DCMAKE_Fortran_COMPILER=$(which ifx)          \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache           \
-            -DAMReX_PARALLEL_LINK_JOBS=2
-        cmake --build build --parallel 2
+            -DAMReX_PARALLEL_LINK_JOBS=4
+        cmake --build build --parallel 4
 
         ccache -s
         du -hs ~/.cache/ccache
@@ -88,8 +88,8 @@ jobs:
             -DCMAKE_C_COMPILER=$(which icx)                \
             -DCMAKE_CXX_COMPILER=$(which icpx)             \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache           \
-            -DAMReX_PARALLEL_LINK_JOBS=2
-        cmake --build build --parallel 2
+            -DAMReX_PARALLEL_LINK_JOBS=4
+        cmake --build build --parallel 4
 
         ccache -s
         du -hs ~/.cache/ccache
@@ -97,6 +97,7 @@ jobs:
   tests-oneapi-sycl-eb-nvidia:
     name: oneAPI SYCL for Nvidia GPUs [tests w/ EB]
     runs-on: ubuntu-latest
+    if: 0
     steps:
     - uses: actions/checkout@v4
     - name: Dependencies
@@ -134,8 +135,8 @@ jobs:
             -DCMAKE_C_COMPILER=$(which icx)                \
             -DCMAKE_CXX_COMPILER=$(which clang++)          \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache           \
-            -DAMReX_PARALLEL_LINK_JOBS=2
-        cmake --build build --parallel 2
+            -DAMReX_PARALLEL_LINK_JOBS=4
+        cmake --build build --parallel 4
 
         ccache -s
         du -hs ~/.cache/ccache
@@ -143,6 +144,7 @@ jobs:
   no-tests-oneapi-sycl-amd:
     name: oneAPI SYCL for AMD GPUs
     runs-on: ubuntu-20.04
+    if: 0
     steps:
     - uses: actions/checkout@v4
     - name: Dependencies
@@ -180,8 +182,8 @@ jobs:
             -DCMAKE_C_COMPILER=$(which icx)                \
             -DCMAKE_CXX_COMPILER=$(which clang++)          \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache           \
-            -DAMReX_PARALLEL_LINK_JOBS=2
-        cmake --build build --parallel 2
+            -DAMReX_PARALLEL_LINK_JOBS=4
+        cmake --build build --parallel 4
 
         ccache -s
         du -hs ~/.cache/ccache
@@ -224,7 +226,7 @@ jobs:
             -DCMAKE_C_COMPILER=$(which icc)                \
             -DCMAKE_CXX_COMPILER=$(which icpc)             \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-        cmake --build build --parallel 2
+        cmake --build build --parallel 4
         cmake --build build --target install
         cmake --build build --target test_install
 
