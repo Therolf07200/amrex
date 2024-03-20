@@ -70,6 +70,7 @@ BLBackTrace::handler(int s)
     case SIGABRT:
         amrex::ErrorStream() << "SIGABRT\n";
         break;
+    default: break;
     }
 
 #if defined(AMREX_BACKTRACE_SUPPORTED) || defined(AMREX_TINY_PROFILING)
@@ -371,7 +372,7 @@ BLBTer::BLBTer(const std::string& s, const char* file, int line)
     std::ostringstream ss0;
     ss0 << "Proc. " << ParallelDescriptor::MyProc()
         << ": \"" << s << "\"";
-    BLBackTrace::bt_stack.push(std::make_pair(ss0.str(), line_file));
+    BLBackTrace::bt_stack.emplace(ss0.str(), line_file);
 #endif
 }
 

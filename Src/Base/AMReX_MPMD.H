@@ -26,7 +26,10 @@ int MyProgId (); //! Program ID
 class Copier
 {
 public:
-    Copier (BoxArray const& ba, DistributionMapping const& dm);
+    Copier (bool);
+
+    Copier (BoxArray const& ba, DistributionMapping const& dm,
+            bool send_ba = false);
 
     template <typename FAB>
     void send (FabArray<FAB> const& mf, int icomp, int ncomp) const;
@@ -34,9 +37,16 @@ public:
     template <typename FAB>
     void recv (FabArray<FAB>& mf, int icomp, int ncomp) const;
 
+    [[nodiscard]] BoxArray const& boxArray () const;
+
+    [[nodiscard]] DistributionMapping const& DistributionMap () const;
+
 private:
     std::map<int,FabArrayBase::CopyComTagsContainer> m_SndTags;
     std::map<int,FabArrayBase::CopyComTagsContainer> m_RcvTags;
+    bool m_is_thread_safe;
+    BoxArray m_ba;
+    DistributionMapping m_dm;
 };
 
 template <typename FAB>
@@ -166,14 +176,15 @@ void Copier::recv (FabArray<FAB>& mf, int icomp, int ncomp) const
 #ifdef AMREX_USE_GPU
     if (Gpu::inLaunchRegion() && (mf.arena()->isDevice() || mf.arena()->isManaged())) {
         mf.unpack_recv_buffer_gpu(mf, icomp, ncomp, recv_data, recv_size, recv_cctc,
-                                  FabArrayBase::COPY, true);
+                                  FabArrayBase::COPY, m_is_thread_safe);
     } else
 #endif
     {
         mf.unpack_recv_buffer_cpu(mf, icomp, ncomp, recv_data, recv_size, recv_cctc,
-                                  FabArrayBase::COPY, true);
+                                  FabArrayBase::COPY, m_is_thread_safe);
     }
 }
+
 
 }
 
