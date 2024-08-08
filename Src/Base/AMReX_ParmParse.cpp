@@ -5,6 +5,7 @@
 #include <AMReX_ParallelDescriptor.H>
 #include <AMReX_Print.H>
 #include <AMReX_RealVect.H>
+#include <AMReX_Utility.H>
 
 #include <algorithm>
 #include <cctype>
@@ -139,12 +140,13 @@ template <>
 bool
 is (const std::string& str, bool& val)
 {
-    if ( str == "true" || str == "t" )
+    auto const lo_str = amrex::toLower(str);
+    if ( lo_str == "true" || lo_str == "t" )
     {
         val = true;
         return true;
     }
-    if ( str == "false" || str == "f" )
+    if ( lo_str == "false" || lo_str == "f" )
     {
         val = false;
         return true;
@@ -942,7 +944,7 @@ PARSER_t
 pp_make_parser (std::string const& func, Vector<std::string> const& vars,
                 ParmParse::Table const& table, std::string const& parser_prefix)
 {
-    using value_t =  std::conditional_t<std::is_integral_v<T>, int, double>;
+    using value_t =  std::conditional_t<std::is_integral_v<T>, long long, double>;
 
     std::vector<std::string> prefixes;
     prefixes.reserve(3);
@@ -1117,9 +1119,10 @@ ParmParse::Verbose ()
 {
     if (pp_detail::verbose < 0) {
         pp_detail::verbose = std::max(amrex::Verbose(),0);
-        ParmParse pp("parmparse");
-        pp.queryAdd("v", pp_detail::verbose);
-        pp.queryAdd("verbose", pp_detail::verbose);
+        ParmParse pp("amrex.parmparse");
+        if (! pp.query("verbose", "v", pp_detail::verbose)) {
+            pp.add("verbose", pp_detail::verbose);
+        }
     }
     return pp_detail::verbose;
 }
