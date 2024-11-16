@@ -164,6 +164,8 @@ public:
     template <typename F>
     void post_forward_doit (F const& post_forward);
 
+    void prepare_openbc ();
+
 private:
 
     static std::pair<Plan<T>,Plan<T>> make_c2c_plans (cMF& inout);
@@ -176,6 +178,8 @@ private:
     Plan<T> m_fft_bwd_y{};
     Plan<T> m_fft_fwd_z{};
     Plan<T> m_fft_bwd_z{};
+    Plan<T> m_fft_fwd_x_half{};
+    Plan<T> m_fft_bwd_x_half{};
 
     // Comm meta-data. In the forward phase, we start with (x,y,z),
     // transpose to (y,x,z) and then (z,x,y). In the backward phase, we
@@ -186,6 +190,8 @@ private:
     std::unique_ptr<MultiBlockCommMetaData> m_cmd_z2y; // (z,x,y) -> (y,x,z)
     std::unique_ptr<MultiBlockCommMetaData> m_cmd_x2z; // (x,y,z) -> (z,x,y)
     std::unique_ptr<MultiBlockCommMetaData> m_cmd_z2x; // (z,x,y) -> (x,y,z)
+    std::unique_ptr<MultiBlockCommMetaData> m_cmd_x2z_half; // for openbc
+    std::unique_ptr<MultiBlockCommMetaData> m_cmd_z2x_half; // for openbc
     Swap01 m_dtos_x2y{};
     Swap01 m_dtos_y2x{};
     Swap02 m_dtos_y2z{};
@@ -209,6 +215,7 @@ private:
     Info m_info;
 
     bool m_slab_decomp = false;
+    bool m_openbc_half = false;
 };
 
 template <typename T, Direction D, DomainStrategy S>
@@ -391,6 +398,60 @@ R2C<T,D,S>::~R2C<T,D,S> ()
     m_fft_fwd_x.destroy();
     m_fft_fwd_y.destroy();
     m_fft_fwd_z.destroy();
+    if (m_fft_bwd_x_half.plan != m_fft_fwd_x_half.plan) {
+        m_fft_bwd_x_half.destroy();
+    }
+    m_fft_fwd_x_half.destroy();
+}
+
+template <typename T, Direction D, DomainStrategy S>
+void R2C<T,D,S>::prepare_openbc ()
+{
+#if (AMREX_SPACEDIM == 3)
+    if (m_slab_decomp) {
+        auto* fab = detail::get_fab(m_rx);
+        if (fab) {
+            Box bottom_half = m_real_domain;
+            bottom_half.growHi(2,-m_real_domain.length(2)/2);
+            Box box = fab->box() & bottom_half;
+            if (box.ok()) {
+                auto* pr = fab->dataPtr();
+                auto* pc = (typename Plan<T>::VendorComplex *)
+                    detail::get_fab(m_cx)->dataPtr();
+#ifdef AMREX_USE_SYCL
+                m_fft_fwd_x_half.template init_r2c<Direction::forward>
+                    (box, pr, pc, m_slab_decomp);
+                m_fft_bwd_x_half = m_fft_fwd_x_half;
+#else
+                if constexpr (D == Direction::both || D == Direction::forward) {
+                    m_fft_fwd_x_half.template init_r2c<Direction::forward>
+                        (box, pr, pc, m_slab_decomp);
+                }
+                if constexpr (D == Direction::both || D == Direction::backward) {
+                    m_fft_bwd_x_half.template init_r2c<Direction::backward>
+                        (box, pr, pc, m_slab_decomp);
+                }
+#endif
+            }
+        }
+    } // else todo
+
+    if (m_cmd_x2z && ! m_cmd_x2z_half) {
+        Box bottom_half = m_spectral_domain_z;
+        // Note that z-direction's index is 0 because we z is the
+        // unit-stride direction here.
+        bottom_half.growHi(0,-m_spectral_domain_z.length(0)/2);
+        m_cmd_x2z_half = std::make_unique<MultiBlockCommMetaData>
+            (m_cz, bottom_half, m_cx, IntVect(0), m_dtos_x2z);
+    }
+
+    if (m_cmd_z2x && ! m_cmd_z2x_half) {
+        Box bottom_half = m_spectral_domain_x;
+        bottom_half.growHi(2,-m_spectral_domain_x.length(2)/2);
+        m_cmd_z2x_half = std::make_unique<MultiBlockCommMetaData>
+            (m_cx, bottom_half, m_cz, IntVect(0), m_dtos_z2x);
+    }
+#endif
 }
 
 template <typename T, Direction D, DomainStrategy S>
@@ -403,7 +464,8 @@ void R2C<T,D,S>::forward (MF const& inmf)
     if (&m_rx != &inmf) {
         m_rx.ParallelCopy(inmf, 0, 0, 1);
     }
-    m_fft_fwd_x.template compute_r2c<Direction::forward>();
+    auto& fft_x = m_openbc_half ? m_fft_fwd_x_half : m_fft_fwd_x;
+    fft_x.template compute_r2c<Direction::forward>();
 
     if (                          m_cmd_x2y) {
         ParallelCopy(m_cy, m_cx, *m_cmd_x2y, 0, 0, 1, m_dtos_x2y);
@@ -415,7 +477,21 @@ void R2C<T,D,S>::forward (MF const& inmf)
     }
 #if (AMREX_SPACEDIM == 3)
     else if (                     m_cmd_x2z) {
-        ParallelCopy(m_cz, m_cx, *m_cmd_x2z, 0, 0, 1, m_dtos_x2z);
+        if (m_openbc_half) {
+            NonLocalBC::ApplyDtosAndProjectionOnReciever packing
+                {NonLocalBC::PackComponents{}, m_dtos_x2z};
+            auto handler = ParallelCopy_nowait(m_cz, m_cx, *m_cmd_x2z_half, packing);
+
+            Box upper_half = m_spectral_domain_z;
+            // Note that z-direction's index is 0 because we z is the
+            // unit-stride direction here.
+            upper_half.growLo (0,-m_spectral_domain_z.length(0)/2);
+            m_cz.setVal(0, upper_half, 0, 1);
+
+            ParallelCopy_finish(m_cz, std::move(handler), *m_cmd_x2z_half, packing);
+        } else {
+            ParallelCopy(m_cz, m_cx, *m_cmd_x2z, 0, 0, 1, m_dtos_x2z);
+        }
     }
 #endif
     m_fft_fwd_z.template compute_c2c<Direction::forward>();
@@ -439,7 +515,8 @@ void R2C<T,D,S>::backward_doit (MF& outmf, IntVect const& ngout)
     }
 #if (AMREX_SPACEDIM == 3)
     else if (                     m_cmd_z2x) {
-        ParallelCopy(m_cx, m_cz, *m_cmd_z2x, 0, 0, 1, m_dtos_z2x);
+        auto const& cmd = m_openbc_half ? m_cmd_z2x_half : m_cmd_z2x;
+        ParallelCopy(m_cx, m_cz, *cmd, 0, 0, 1, m_dtos_z2x);
     }
 #endif
 
@@ -448,7 +525,8 @@ void R2C<T,D,S>::backward_doit (MF& outmf, IntVect const& ngout)
         ParallelCopy(m_cx, m_cy, *m_cmd_y2x, 0, 0, 1, m_dtos_y2x);
     }
 
-    m_fft_bwd_x.template compute_r2c<Direction::backward>();
+    auto& fft_x = m_openbc_half ? m_fft_bwd_x_half : m_fft_bwd_x;
+    fft_x.template compute_r2c<Direction::backward>();
     outmf.ParallelCopy(m_rx, 0, 0, 1, IntVect(0), ngout);
 }
 

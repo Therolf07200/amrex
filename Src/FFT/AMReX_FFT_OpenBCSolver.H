@@ -3,8 +3,6 @@
 
 #include <AMReX_FFT_R2C.H>
 
-#include <AMReX_VisMF.H>
-
 namespace amrex::FFT
 {
 
@@ -153,6 +151,8 @@ void OpenBCSolver<T>::setGreensFunction (F const& greens_function)
             }
         }
     }
+
+    m_r2c.prepare_openbc();
 }
 
 template <typename T>
@@ -162,7 +162,9 @@ void OpenBCSolver<T>::solve (MF& phi, MF const& rho)
     inmf.setVal(T(0));
     inmf.ParallelCopy(rho, 0, 0, 1);
 
+    m_r2c.m_openbc_half = true;
     m_r2c.forward(inmf);
+    m_r2c.m_openbc_half = false;
 
     auto scaling_factor = m_r2c.scalingFactor();
 
@@ -198,7 +200,9 @@ void OpenBCSolver<T>::solve (MF& phi, MF const& rho)
         }
     }
 
+    m_r2c.m_openbc_half = true;
     m_r2c.backward_doit(phi, phi.nGrowVect());
+    m_r2c.m_openbc_half = false;
 }
 
 }
